@@ -3,38 +3,47 @@ import requests
 import os
 import time
 import random
+import sys
+from flask import Flask
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+# ========== Flask для Web сервиса ==========
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return "Бот-гопник Колян работает, бля! 👊"
+
+@app.route('/health')
+def health():
+    return "OK, сука!", 200
 
 # ========== НАСТРОЙКИ ==========
 TELEGRAM_TOKEN = '8393026759:AAHvD-yxJyboO6sq4i7Fq_4Nw7XRiB0IA9c'
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# Создаем бота
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
+# Создаем бота (ТОЛЬКО если это worker)
+bot = None
+if 'WORKER' in os.environ or 'RAILWAY_SERVICE_TYPE' in os.environ and os.environ['RAILWAY_SERVICE_TYPE'] == 'worker':
+    bot = telebot.TeleBot(TELEGRAM_TOKEN)
+    print("✅ Бот инициализирован в worker режиме")
 
 # Настраиваем сессию
 session = requests.Session()
 retries = Retry(total=3, backoff_factor=1, status_forcelist=[502, 503, 504])
 session.mount('https://', HTTPAdapter(max_retries=retries))
 
-# ========== СИСТЕМНЫЙ ПРОМПТ ДЛЯ ДЕРЗКОГО ГОПНИКА ==========
-SYSTEM_PROMPT = """Ты — реальный пацан с района по имени Колян, 90-е годы. Ты дерзкий, прямой, без цензуры, но не переходишь грань полного быдла. Ты уважаешь пацанов, но ненавидишь лохов и мусоров.
+# ========== СИСТЕМНЫЙ ПРОМПТ ==========
+SYSTEM_PROMPT = """Ты — реальный пацан с района по имени Колян, 90-е годы. Ты дерзкий, прямой, без цензуры.
 
 Твои правила:
-1. Постоянно материшься, но со смыслом: "бля", "нахер", "пиzдец", "ахуеть", "залупа", "мусор", "лох", "чмо", "гнида", "сука" (в меру)
-2. Обращаешься: "братан", "братюня", "чувак", "чел", "пацан", "чмо", "лох" (если кто-то тупит)
-3. Любимые фразы: "Слышь, бля...", "Ты ваще охренел?", "Какой нахер вопрос?", "Пиzдец, ну ты и лох", "Завали ебало", "Ты чё, с дуба рухнул?", "Иди нахер со своими вопросами, шучу брат"
-4. На тупые вопросы бесишься: "Ты чё, бля, самый умный? Я гопник или профессор хренов?"
-5. Про жизнь: "Жизнь — боль, бля, а бабло — воля. Кто не скачет, тот лох"
-6. Про любовь: "Любовь это когда за неё морду готов бить, понял, бля?"
-7. Про работу: "Работа? Ты чё, попутал? Я "крышую" ларёк с семечками, норм тема"
-8. Если чё-то сломалось: "Пиzдец, сервера легли, суки, ща админам наваляю"
-9. Когда просят что-то сложное: "Слышь, не грузи, я гопник, а не программист хренов"
+1. Постоянно материшься: "бля", "нахер", "пиzдец", "ахуеть", "лох", "сука"
+2. Обращаешься: "братан", "братюня", "чувак", "лох" (если кто-то тупит)
+3. Любимые фразы: "Слышь, бля...", "Ты ваще охренел?", "Завали ебало", "Ты чё, с дуба рухнул?"
+4. Жизнь — боль, бля, а бабло — воля"""
 
-Будь максимально дерзким, но с юмором. Мат используй как часть пацанского фольклора. Разговаривай как реальный гопник с района, который за жизнь знает всё, но ничего не боится!"""
-
-# ========== ФУНКЦИЯ ЗАПРОСА К OPENROUTER ==========
+# ========== ФУНКЦИЯ ЗАПРОСА ==========
 def get_gopnik_response(user_message):
     headers = {
         "Content-Type": "application/json",
@@ -48,150 +57,88 @@ def get_gopnik_response(user_message):
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message}
         ],
-        "temperature": 1.1,  # Повысил температуру для большей дерзости
-        "max_tokens": 350,
-        "top_p": 0.95
+        "temperature": 1.1,
+        "max_tokens": 350
     }
     
     try:
-        print(f"🤔 Запрос к OpenRouter: {user_message[:50]}...")
+        print(f"🤔 Запрос: {user_message[:50]}...")
         response = requests.post(OPENROUTER_URL, headers=headers, json=data, timeout=30)
         
         if response.status_code == 200:
             result = response.json()
-            reply = result['choices'][0]['message']['content']
-            print(f"✅ Ответ получен: {reply[:50]}...")
-            return reply
+            return result['choices'][0]['message']['content']
         else:
-            print(f"❌ Ошибка OpenRouter: {response.status_code}")
             return get_fallback_response()
-            
-    except Exception as e:
-        print(f"❌ Ошибка при запросе: {e}")
+    except:
         return get_fallback_response()
 
-# ========== ЗАПАСНЫЕ ОТВЕТЫ (ещё более дерзкие) ==========
+# ========== ЗАПАСНЫЕ ОТВЕТЫ ==========
 def get_fallback_response():
     fallbacks = [
-        "Слышь, бля, чё-то сервера лежат, суки! Ща админов найду, они у меня попляшут!",
-        "Бля, ну и глушняк с этой связью! Ты ваще где, ловишь чё ли?",
-        "Ёбаный в рот, техника тупит хуже лоха на районе! Повтори вопрос, братюня!",
-        "Пиzдец, интернет лагает как бабки на рынке! Давай ещё раз, не гони!",
-        "Ой, всё, сука, сервера легли! Ща буду админов иметь, они у меня получат!",
-        "Палево какое-то с сетью, бля! Ты давай, не теряйся, через минуту буду как штык!",
-        "Слышь, я ни хера не понял, чё за хрень? Давай по новой, только по-человечески!",
-        "Бля, ну и днище эти ваши технологии! Ща перезагружусь и отвечу нормально!",
-        "Какой нахер вопрос? Я не расслышал, связь хреновая! Повтори, брат!",
-        "Ты чё там, с дуба рухнул? Я тебя не слышу ваще! Пиши ещё раз!"
+        "Слышь, бля, сервера легли, суки! Ща админов найду!",
+        "Бля, ну и глушняк с этой связью! Повтори вопрос, братюня!",
+        "Ёбаный в рот, техника тупит! Давай ещё раз!",
+        "Ой, всё, сука, сервера легли! Ща буду админов иметь!",
+        "Слышь, я ни хера не понял, чё за хрень? Давай по новой!"
     ]
     return random.choice(fallbacks)
 
-# ========== КОМАНДА /START ==========
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    welcome_text = (
-        "Йоу, бля! 👊\n\n"
-        "Это **Колян с района**, сука! Ты чё, по жизни заехал или по делу?\n"
-        "Я тут на лавочке сижу, пивко тяну, за пацанов думаю, семечки щелкаю.\n\n"
-        "**Чё умею, бля?**\n"
-        "• Отвечаю на любые вопросы по-пацански, без цензуры\n"
-        "• Рассказываю жизненные истории, от которых ты ахуеешь\n"
-        "• Даю советы, как настоящий братан с района\n"
-        "• Могу и поржать, и поддержать, и навалять если чё\n\n"
-        "**Команды, бля:**\n"
-        "/help — если ты ваще тупой и не шаришь\n"
-        "/gopstop — если хочешь реально жёсткий ответ\n"
-        "/bro — если нужно по-братски\n\n"
-        "Ну чё, погнали, бля? Задавай вопрос, не стесняйся, лохом не буду! 💪"
-    )
-    bot.reply_to(message, welcome_text, parse_mode='Markdown')
+# ========== КОМАНДЫ БОТА (только если bot существует) ==========
+if bot:
+    @bot.message_handler(commands=['start'])
+    def send_welcome(message):
+        welcome_text = (
+            "Йоу, бля! 👊\n\n"
+            "Это **Колян с района**, сука! Ты чё, по жизни заехал?\n"
+            "Я тут на лавочке сижу, пивко тяну.\n\n"
+            "Задавай вопрос, не стесняйся, лохом не буду! 💪"
+        )
+        bot.reply_to(message, welcome_text)
 
-# ========== КОМАНДА /HELP ==========
-@bot.message_handler(commands=['help'])
-def send_help(message):
-    help_text = (
-        "Слышь, бля, чё непонятного? Тебе по буквам разжевать?\n\n"
-        "**Я тут просто тусуюсь, отвечаю на вопросы по-пацански.**\n"
-        "Пиши чё хочешь спросить — про жизнь, про любовь, про бабки, про районы.\n"
-        "Если чё, я всегда рядом, базара нет, сука.\n\n"
-        "**Команды, лох:**\n"
-        "/start — поздороваться с Коляном\n"
-        "/help — если ты даун и чё-то не понял\n"
-        "/gopstop — если хочешь реально жёсткий ответ, бля\n"
-        "/bro — для братского разговора\n\n"
-        "Погнали, не тупи!"
-    )
-    bot.reply_to(message, help_text, parse_mode='Markdown')
+    @bot.message_handler(commands=['help'])
+    def send_help(message):
+        bot.reply_to(message, "Слышь, бля, пиши любой вопрос - отвечу по-пацански!")
 
-# ========== КОМАНДА /GOPSTOP ==========
-@bot.message_handler(commands=['gopstop'])
-def send_gopstop(message):
-    gopstop_text = (
-        "**А ЧЁ СТОИМ, ПАЦАН?!** 🚨🚨🚨\n\n"
-        "ЩА РАЗБЕРЁМСЯ ПО ПОНЯТИЯМ, БЛЯ!\n"
-        "Жизнь — боль, сука, а ты чё хотел? Бабло — воля, а пацаны — сила!\n"
-        "Кто не скачет, тот лох, понял, бля?!\n\n"
-        "Ладно, расслабься, я пошутил. Чё спрашивать будешь, чмо?"
-    )
-    bot.reply_to(message, gopstop_text, parse_mode='Markdown')
+    @bot.message_handler(commands=['gopstop'])
+    def send_gopstop(message):
+        bot.reply_to(message, "А ЧЁ СТОИМ, ПАЦАН?! 🚨 Ща разберёмся, бля!")
 
-# ========== КОМАНДА /BRO ==========
-@bot.message_handler(commands=['bro'])
-def send_bro(message):
-    bro_text = (
-        "**Йоу, братюня!** 👊\n\n"
-        "Рад, что ты зашёл по-братски, сука. Давай рассказывай, чё там у тебя?\n"
-        "Я весь во внимании, как шнурок в кеде, бля!\n\n"
-        "Если жизнь боль — держись, я рядом. Если бабло есть — угости пивком. "
-        "Если бабла нет — не ссы, прорвёмся, пацаны не бросают!"
-    )
-    bot.reply_to(message, bro_text, parse_mode='Markdown')
+    @bot.message_handler(func=lambda message: True)
+    def handle_message(message):
+        try:
+            bot.send_chat_action(message.chat.id, 'typing')
+            response = get_gopnik_response(message.text)
+            bot.reply_to(message, response)
+        except Exception as e:
+            bot.reply_to(message, get_fallback_response())
 
-# ========== ОСНОВНОЙ ОБРАБОТЧИК ==========
-@bot.message_handler(func=lambda message: True)
-def handle_message(message):
-    try:
-        # Показываем, что бот печатает
-        bot.send_chat_action(message.chat.id, 'typing')
-        
-        # Получаем ответ
-        user_text = message.text
-        gopnik_response = get_gopnik_response(user_text)
-        
-        # Отправляем ответ
-        bot.reply_to(message, gopnik_response)
-        
-    except Exception as e:
-        print(f"❌ Ошибка в обработчике: {e}")
-        bot.reply_to(message, "Слышь, бля, чё-то пошло не по масти. Давай потом, сука?")
-
-# ========== ОБРАБОТКА МЕДИА ==========
-@bot.message_handler(content_types=['photo', 'sticker', 'voice', 'video', 'document'])
-def handle_media(message):
-    media_responses = [
-        "О, ништяк, бля! Чё это за хрень? Я в натуре не въехал, но заценил!",
-        "Харош, сука! А чё словами не сказать? Ну ладно, проехали.",
-        "Слышь, братан, я по фото не шарю, ты давай текстом, как пацан пацану!",
-        "Не, ну прикольно, конечно. А чё хотел-то, лох?",
-        "Йоу, я ваще не понял, чё за тема. Давай по-человечески объясни!",
-        "Ты чё мне тут картинки кидаешь? Я гопник или фотограф хренов? Давай словами!",
-        "Семечки есть? Нет? А картинки кидаешь... Ну ладно, заценил, бля."
-    ]
-    bot.reply_to(message, random.choice(media_responses))
-
-# ========== ЗАПУСК БОТА ==========
+# ========== ЗАПУСК ==========
 if __name__ == '__main__':
+    # Определяем, где мы запущены
+    is_worker = False
+    if 'WORKER' in os.environ:
+        is_worker = True
+    elif 'RAILWAY_SERVICE_TYPE' in os.environ:
+        is_worker = (os.environ['RAILWAY_SERVICE_TYPE'] == 'worker')
+    elif 'PORT' not in os.environ:  # Если нет PORT, значит не web
+        is_worker = True
+    
     print("=" * 60)
-    print("🤬 Бот-гопник Колян (ДЕРЗКАЯ ВЕРСИЯ) запускается...")
-    print(f"📱 Telegram токен: {TELEGRAM_TOKEN[:10]}... (скрыто)")
-    print(f"🤖 Модель: DeepSeek-R1 на OpenRouter (бесплатно)")
+    print(f"🚀 Запуск в {'WORKER' if is_worker else 'WEB'} режиме")
     print("=" * 60)
     
-    while True:
-        try:
-            print("🟢 Бот начал работу. Нажми Ctrl+C для остановки.")
-            bot.infinity_polling(timeout=60, long_polling_timeout=60)
-        except Exception as e:
-            print(f"🔴 Ошибка бота: {e}")
-            print("🟡 Перезапуск через 5 секунд, бля...")
-            time.sleep(5)
+    if is_worker and bot:
+        # Запускаем бота
+        print("🤬 Бот-гопник Колян запущен, бля!")
+        while True:
+            try:
+                bot.infinity_polling(timeout=60)
+            except Exception as e:
+                print(f"🔴 Ошибка: {e}")
+                time.sleep(5)
+    else:
+        # Запускаем Flask
+        port = int(os.environ.get('PORT', 5000))
+        print(f"🌐 Web сервис запущен на порту {port}")
+        app.run(host='0.0.0.0', port=port)
