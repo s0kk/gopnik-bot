@@ -10,6 +10,20 @@ from collections import deque
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+# ========== ЖЁСТКАЯ ЗАЩИТА ОТ 409 ==========
+TELEGRAM_TOKEN = '8393026759:AAHvD-yxJyboO6sq4i7Fq_4Nw7XRiB0IA9c'
+
+# Сбрасываем все вебхуки и закрываем старые сессии
+print("🔄 Сброс всех подключений Telegram...")
+try:
+    requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook")
+    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/close")
+    print("✅ Старые подключения сброшены")
+except:
+    print("⚠️ Не удалось сбросить подключения")
+
+time.sleep(2)  # Даем время на сброс
+
 # ========== ЖЕСТЧАЙШАЯ ПРОВЕРКА ДЛЯ GUNICORN ==========
 if 'gunicorn' in sys.argv[0] or 'GUNICORN_CMD_ARGS' in os.environ:
     print("🚫 Запущен через gunicorn - только Flask, бота НЕТ")
@@ -40,7 +54,6 @@ def health():
     return "OK, сука!", 200
 
 # ========== НАСТРОЙКИ ==========
-TELEGRAM_TOKEN = '8393026759:AAHvD-yxJyboO6sq4i7Fq_4Nw7XRiB0IA9c'
 GEMINI_API_KEY = 'AIzaSyCZdIlCriIT78AVVhLfMIsICEahuvpRAYk'
 
 # Настраиваем Gemini
@@ -76,6 +89,9 @@ def get_history_prompt(chat_id):
             history_text += f"Колян: {text}\n"
     
     return history_text
+
+# ========== ДАЛЬШЕ ТВОЙ КОД С БОТОМ ==========
+# ... (весь остальной код, который у тебя был)
 
 # Создаем бота
 bot = None
