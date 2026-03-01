@@ -8,7 +8,25 @@ from flask import Flask
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# ========== Flask для Web сервиса ==========
+# ЖЕСТКАЯ ПРОВЕРКА - если запущено через gunicorn, НЕ ЗАПУСКАЕМ БОТА
+if 'gunicorn' in sys.argv[0] or 'GUNICORN_CMD_ARGS' in os.environ:
+    print("🚫 Запущен через gunicorn - бот не инициализируется")
+    # Запускаем только Flask
+    app = Flask(__name__)
+    
+    @app.route('/')
+    def index():
+        return "Бот-гопник Колян работает, бля! 👊"
+    
+    @app.route('/health')
+    def health():
+        return "OK, сука!", 200
+    
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
+    sys.exit(0)
+
+# ========== Flask для Web сервиса (если не gunicorn) ==========
 app = Flask(__name__)
 
 @app.route('/')
@@ -20,12 +38,12 @@ def health():
     return "OK, сука!", 200
 
 # ========== НАСТРОЙКИ ==========
-TELEGRAM_TOKEN = '8393026759:AAHvD-yxJyboO6sq4i7Fq_4Nw7XRiB0IA9c'
+TELEGRAM_TOKEN = '8393026759:AAHvD-yxJyboO6sq4i7Fq_4Nw7XRiB0IA9c'  # Твой токен
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # Создаем бота (ТОЛЬКО если это worker)
 bot = None
-if 'WORKER' in os.environ or 'RAILWAY_SERVICE_TYPE' in os.environ and os.environ['RAILWAY_SERVICE_TYPE'] == 'worker':
+if 'WORKER' in os.environ or ('RAILWAY_SERVICE_TYPE' in os.environ and os.environ['RAILWAY_SERVICE_TYPE'] == 'worker'):
     bot = telebot.TeleBot(TELEGRAM_TOKEN)
     print("✅ Бот инициализирован в worker режиме")
 
@@ -96,7 +114,6 @@ if bot:
             "Я тут на лавочке сижу, пивко тяну.\n\n"
             "Задавай вопрос, не стесняйся, лохом не буду! 💪"
         )
-        # ВАЖНО: используем send_message, а НЕ reply_to!
         bot.send_message(message.chat.id, welcome_text)
 
     @bot.message_handler(commands=['help'])
@@ -114,7 +131,6 @@ if bot:
         try:
             bot.send_chat_action(message.chat.id, 'typing')
             response = get_gopnik_response(message.text)
-            # ВАЖНО: используем send_message, а НЕ reply_to!
             bot.send_message(message.chat.id, response)
         except Exception as e:
             print(f"❌ Ошибка: {e}")
@@ -147,7 +163,6 @@ if __name__ == '__main__':
     if is_worker and bot:
         # Запускаем бота
         print("🤬 Бот-гопник Колян запущен, бля!")
-        print("⚠️ ВНИМАНИЕ: Используем send_message вместо reply_to!")
         while True:
             try:
                 bot.infinity_polling(timeout=60)
