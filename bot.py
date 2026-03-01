@@ -69,8 +69,10 @@ def get_gopnik_response(user_message):
             result = response.json()
             return result['choices'][0]['message']['content']
         else:
+            print(f"❌ Ошибка API: {response.status_code}")
             return get_fallback_response()
-    except:
+    except Exception as e:
+        print(f"❌ Ошибка: {e}")
         return get_fallback_response()
 
 # ========== ЗАПАСНЫЕ ОТВЕТЫ ==========
@@ -94,24 +96,38 @@ if bot:
             "Я тут на лавочке сижу, пивко тяну.\n\n"
             "Задавай вопрос, не стесняйся, лохом не буду! 💪"
         )
-        bot.reply_to(message, welcome_text)
+        # ВАЖНО: используем send_message, а НЕ reply_to!
+        bot.send_message(message.chat.id, welcome_text)
 
     @bot.message_handler(commands=['help'])
     def send_help(message):
-        bot.reply_to(message, "Слышь, бля, пиши любой вопрос - отвечу по-пацански!")
+        help_text = "Слышь, бля, пиши любой вопрос - отвечу по-пацански!"
+        bot.send_message(message.chat.id, help_text)
 
     @bot.message_handler(commands=['gopstop'])
     def send_gopstop(message):
-        bot.reply_to(message, "А ЧЁ СТОИМ, ПАЦАН?! 🚨 Ща разберёмся, бля!")
+        gopstop_text = "А ЧЁ СТОИМ, ПАЦАН?! 🚨 Ща разберёмся, бля!"
+        bot.send_message(message.chat.id, gopstop_text)
 
     @bot.message_handler(func=lambda message: True)
     def handle_message(message):
         try:
             bot.send_chat_action(message.chat.id, 'typing')
             response = get_gopnik_response(message.text)
-            bot.reply_to(message, response)
+            # ВАЖНО: используем send_message, а НЕ reply_to!
+            bot.send_message(message.chat.id, response)
         except Exception as e:
-            bot.reply_to(message, get_fallback_response())
+            print(f"❌ Ошибка: {e}")
+            bot.send_message(message.chat.id, get_fallback_response())
+
+    @bot.message_handler(content_types=['photo', 'sticker', 'voice', 'video', 'document'])
+    def handle_media(message):
+        media_responses = [
+            "О, ништяк, бля! А чё словами не сказать?",
+            "Слышь, я по фото не шарю, ты давай текстом!",
+            "Ты чё мне тут картинки кидаешь? Я гопник или кто?"
+        ]
+        bot.send_message(message.chat.id, random.choice(media_responses))
 
 # ========== ЗАПУСК ==========
 if __name__ == '__main__':
@@ -121,7 +137,7 @@ if __name__ == '__main__':
         is_worker = True
     elif 'RAILWAY_SERVICE_TYPE' in os.environ:
         is_worker = (os.environ['RAILWAY_SERVICE_TYPE'] == 'worker')
-    elif 'PORT' not in os.environ:  # Если нет PORT, значит не web
+    elif 'PORT' not in os.environ:
         is_worker = True
     
     print("=" * 60)
@@ -131,6 +147,7 @@ if __name__ == '__main__':
     if is_worker and bot:
         # Запускаем бота
         print("🤬 Бот-гопник Колян запущен, бля!")
+        print("⚠️ ВНИМАНИЕ: Используем send_message вместо reply_to!")
         while True:
             try:
                 bot.infinity_polling(timeout=60)
