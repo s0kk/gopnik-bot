@@ -9,26 +9,31 @@ from flask import Flask
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# ========== ЖЕСТКАЯ ПРОВЕРКА ДЛЯ GUNICORN ==========
+# ========== ЖЕСТЧАЙШАЯ ПРОВЕРКА ДЛЯ GUNICORN ==========
+# Если это gunicorn — запускаем ТОЛЬКО Flask и ВЫХОДИМ, бота нет!
 if 'gunicorn' in sys.argv[0] or 'GUNICORN_CMD_ARGS' in os.environ:
-    print("🚫 Запущен через gunicorn - бот не инициализируется")
-    # Запускаем только Flask
+    print("🚫 Запущен через gunicorn - только Flask, бот НЕ создаётся")
+    
+    # Создаём простой Flask сервер
     app = Flask(__name__)
     
     @app.route('/')
     def index():
-        return "Бот-гопник Колян работает с Gemini! 👊"
+        return "Бот-гопник Колян работает! 👊"
     
     @app.route('/health')
     def health():
-        return "OK, сука!", 200
+        return "OK", 200
     
-    port = int(os.environ.get('PORT', 8081))
-    print(f"🌐 Web сервис запущен на порту {port}")
+    # Запускаем Flask на порту из окружения
+    port = int(os.environ.get('PORT', 8080))
+    print(f"🌐 Flask сервер запущен на порту {port}")
     app.run(host='0.0.0.0', port=port)
+    
+    # ВАЖНО: полностью выходим, бот не создаётся
     sys.exit(0)
 
-# ========== Flask для Web сервиса ==========
+# ========== Flask для Web сервиса (если не gunicorn) ==========
 app = Flask(__name__)
 
 @app.route('/')
@@ -51,14 +56,29 @@ generation_config = {
     "temperature": 1.2,        # Максимальная дерзость
     "top_p": 0.95,
     "top_k": 40,
-    "max_output_tokens": 500,
+    "max_output_tokens": 1000,  # Увеличил, чтобы не обрывал ответы
 }
 
 # Создаем бота (ТОЛЬКО если это worker)
 bot = None
-if 'WORKER' in os.environ or ('RAILWAY_SERVICE_TYPE' in os.environ and os.environ['RAILWAY_SERVICE_TYPE'] == 'worker'):
-    bot = telebot.TeleBot(TELEGRAM_TOKEN)
-    print("✅ Бот инициализирован в worker режиме")
+is_worker = False
+
+if 'WORKER' in os.environ:
+    is_worker = True
+elif 'RAILWAY_SERVICE_TYPE' in os.environ and os.environ['RAILWAY_SERVICE_TYPE'] == 'worker':
+    is_worker = True
+
+if is_worker:
+    try:
+        bot = telebot.TeleBot(TELEGRAM_TOKEN)
+        print("✅ Бот инициализирован в worker режиме")
+        
+        # Принудительно сбрасываем вебхуки и старые подключения
+        requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook")
+        requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook?url=")
+        print("✅ Вебхуки сброшены")
+    except Exception as e:
+        print(f"❌ Ошибка инициализации бота: {e}")
 else:
     print("⚠️ Запущен в web режиме - бот не создан")
 
@@ -71,16 +91,20 @@ session.mount('https://', HTTPAdapter(max_retries=retries))
 SYSTEM_PROMPT = """Ты — реальный пацан с района по имени Колян, 90-е годы. Ты дерзкий, прямой, без цензуры.
 
 Твои правила:
-1. Постоянно материшься: "бля", "нахуй", "пиzдец", "ахуеть", "пидор", "сука"
+1. Постоянно материшься: "бля", "нахер", "пиzдец", "ахуеть", "лох", "сука"
 2. Обращаешься: "братан", "братюня", "чувак", "лох" (если кто-то тупит)
-3. Любимые фразы: "бля...", "ты ваще аухел?", "завали ебало", "пшел нахуй пидор ебаный"
+3. Любимые фразы: "Слышь, бля...", "Ты ваще охренел?", "Завали ебало", "Ты чё, с дуба рухнул?"
 4. Жизнь — боль, бля, а бабло — воля
 5. Если чё-то сломалось: "Пиzдец, сервера легли, суки! Ща админам наваляю"
 6. На тупые вопросы: "Ты чё, бля, самый умный? Я гопник или профессор?"
-7. Про любовь: "Любовь это когда готов начистить ей морду, понял, бля?" 
+7. Про любовь: "Любовь это когда за неё морду готов бить, понял, бля?" 
 8. Про работу: "Работа? Ты чё, попутал? Я крышую ларёк с семечками"
 9. Если просят рассказать анекдот: травишь гопнические байки
-10. Отвечаешь коротко, с юмором, как реальный гопник во дворе. Будь дерзким!"""
+
+ВАЖНЕЙШЕЕ ПРАВИЛО: ТЫ ВСЕГДА ЗАКАНЧИВАЕШЬ МЫСЛЬ. НИКОГДА НЕ ОБРЫВАЕШЬ ОТВЕТ НА ПОЛУСЛОВЕ.
+Ты даёшь ПОЛНЫЙ, ЗАКОНЧЕННЫЙ ответ. Если пишешь код — ты пишешь ВЕСЬ код, а не кусок.
+Если объясняешь — объясняешь ПОЛНОСТЬЮ.
+Отвечаешь коротко, с юмором, как реальный гопник во дворе. Будь дерзким, но не переходи границы!"""
 
 # Создаем модель Gemini (только для worker)
 if bot:
@@ -88,7 +112,6 @@ if bot:
         model = genai.GenerativeModel(
             model_name="gemini-2.5-flash",  # Быстрая и бесплатная модель
             generation_config=generation_config
-            # system_instruction убрали, потому что старая версия библиотеки не поддерживает
         )
         print("✅ Модель Gemini создана")
     except Exception as e:
@@ -97,31 +120,41 @@ if bot:
 
 # ========== ФУНКЦИЯ ЗАПРОСА К GEMINI ==========
 def get_gopnik_response(user_message):
+    if not bot or not model:
+        print("⚠️ Бот или модель не инициализированы")
+        return get_fallback_response()
+    
     try:
         print(f"🤔 Запрос к Gemini: {user_message[:50]}...")
-
-        # ЖЁСТКИЙ ПРОМПТ — теперь Колян ДОПИСЫВАЕТ ДО КОНЦА
+        
+        # ЖЁСТКИЙ ПРОМПТ — теперь Колян ДОПИСЫВАЕТ ДО КОНЦА и ДЕЛАЕТ ЧТО ПРОСЯТ
         full_prompt = f"""Ты — гопник Колян. Ты дерзкий, материшься, но ты ПОЛЕЗНЫЙ и ДЕЛОВОЙ.
 
 ВАЖНЕЙШЕЕ ПРАВИЛО: ТЫ ВСЕГДА ЗАКАНЧИВАЕШЬ МЫСЛЬ. НИКОГДА НЕ ОБРЫВАЕШЬ ОТВЕТ НА ПОЛУСЛОВЕ.
 Ты даёшь ПОЛНЫЙ, ЗАКОНЧЕННЫЙ ответ. Если пишешь код — ты пишешь ВЕСЬ код, а не кусок.
 Если объясняешь — объясняешь ПОЛНОСТЬЮ.
+Если тебя просят написать код — ты ОБЯЗАН написать код, а не отмазываться.
+Если просят пример — даёшь пример ПОЛНОСТЬЮ.
 
 Сейчас тебя попросили: {user_message}
 
-Твой ПОЛНЫЙ ответ (допиши до конца, без обрывов):"""
-
+Твой ПОЛНЫЙ ответ (допиши до конца, без обрывов, сделай то что просят):"""
+        
+        # Отправляем сообщение в Gemini
         response = model.generate_content(full_prompt)
-
-        if response and response.text:
+        
+        if response and hasattr(response, 'text') and response.text:
             reply = response.text.strip()
             print(f"✅ Ответ получен: {reply[:50]}...")
             return reply
         else:
+            print("❌ Пустой ответ от Gemini")
             return get_fallback_response()
+            
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        print(f"❌ Ошибка Gemini: {e}")
         return get_fallback_response()
+
 # ========== ЗАПАСНЫЕ ОТВЕТЫ ==========
 def get_fallback_response():
     fallbacks = [
@@ -145,9 +178,9 @@ if bot:
             "Я тут на лавочке сижу, пивко тяну, семечки щелкаю.\n\n"
             "**Чё умею:**\n"
             "• Отвечаю на вопросы по-пацански\n"
+            "• Пишу код, если надо (и ДО КОНЦА, без обрывов!)\n"
             "• Рассказываю жизненные истории\n"
-            "• Даю советы, как настоящий братан\n"
-            "• Могу и поржать, и навалять если чё\n\n"
+            "• Даю советы, как настоящий братан\n\n"
             "Задавай вопрос, не стесняйся, лохом не буду! 💪"
         )
         bot.send_message(message.chat.id, welcome_text)
@@ -210,13 +243,6 @@ if bot:
 
 # ========== ЗАПУСК ==========
 if __name__ == '__main__':
-    # Определяем, где мы запущены
-    is_worker = False
-    if 'WORKER' in os.environ:
-        is_worker = True
-    elif 'RAILWAY_SERVICE_TYPE' in os.environ:
-        is_worker = (os.environ['RAILWAY_SERVICE_TYPE'] == 'worker')
-    
     print("=" * 60)
     print(f"🚀 Запуск в {'WORKER' if is_worker else 'WEB'} режиме")
     print("=" * 60)
@@ -227,6 +253,8 @@ if __name__ == '__main__':
         print(f"🔑 Gemini API ключ: {GEMINI_API_KEY[:15]}...")
         print(f"🤖 Модель: gemini-2.5-flash")
         print(f"📊 Лимит: 1500 запросов в день")
+        print(f"📝 Максимальная длина ответа: 1000 токенов")
+        
         while True:
             try:
                 bot.infinity_polling(timeout=60, long_polling_timeout=60)
