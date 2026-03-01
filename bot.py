@@ -63,7 +63,6 @@ is_worker = os.environ.get('WORKER') == 'true'
 if is_worker:
     try:
         bot = telebot.TeleBot(TELEGRAM_TOKEN)
-        # Тест подключения
         me = bot.get_me()
         print(f"✅ БОТ ЗАПУЩЕН: @{me.username}")
         print(f"✅ ID: {me.id}")
@@ -77,12 +76,7 @@ SYSTEM_PROMPT = """Ты — гопник Колян. Отвечаешь дерз
 1. Матерись, но не переходи границы
 2. Отвечай ПОЛНОСТЬЮ, не обрывай на полуслове
 3. Если просят код — пиши код
-4. Используй слова: бля, сука, нахер, братан
-
-Пример: 
-- "Слышь, бля, ща напишу код, не гони!"
-- "Держи код, сука. print('привет, лох')"
-"""
+4. Используй слова: бля, сука, нахер, братан"""
 
 # ========== ФУНКЦИЯ ОТВЕТА ==========
 def get_gopnik_response(user_message, chat_id):
@@ -92,16 +86,16 @@ def get_gopnik_response(user_message, chat_id):
         # Собираем историю
         history_text = ""
         if chat_id in chat_history:
-            history_text = "\n".join([f"{r}: {t}" for r, t in chat_history[chat_id]])
+            for role, text in list(chat_history[chat_id])[-5:]:  # последние 5 сообщений
+                history_text += f"{'Колян' if role=='assistant' else 'Чел'}: {text}\n"
         
         prompt = f"""{SYSTEM_PROMPT}
 
-История:
+История разговора:
 {history_text}
 
-Сейчас спросили: {user_message}
-
-Ответ Коляна (полный, до конца):"""
+Чел: {user_message}
+Колян (ответь полностью, не обрывай, с матом, но по делу):"""
         
         # Пробуем разные модели
         models = [
@@ -112,14 +106,27 @@ def get_gopnik_response(user_message, chat_id):
         for model_name in models:
             try:
                 print(f"🔄 Пробую {model_name}...")
-                model = genai.GenerativeModel(model_name, generation_config=generation_config)
-                resp = model.generate_content(prompt, timeout=15)
+                
+                # ВАЖНО: timeout НЕ передаём в модель
+                model = genai.GenerativeModel(
+                    model_name=model_name,
+                    generation_config=generation_config
+                )
+                
+                # timeout передаём ТОЛЬКО сюда
+                resp = model.generate_content(
+                    prompt,
+                    request_options={"timeout": 15}  # ✅ правильный способ
+                )
                 
                 if resp and hasattr(resp, 'text') and resp.text:
                     reply = resp.text.strip()
                     print(f"✅ Ответ от {model_name}")
                     add_to_history(chat_id, "assistant", reply)
                     return reply
+                else:
+                    print(f"⚠️ Пустой ответ от {model_name}")
+                    
             except Exception as e:
                 print(f"❌ {model_name} ошибка: {e}")
                 continue
@@ -135,11 +142,12 @@ if bot:
     @bot.message_handler(commands=['start'])
     def start(message):
         chat_id = message.chat.id
-        chat_history.pop(chat_id, None)
+        if chat_id in chat_history:
+            del chat_history[chat_id]
         bot.send_message(
             chat_id,
             "Йоу, бля! 👊\n\n"
-            "Я **Колян**, снова на связи!\n"
+            "Я **Колян**, на связи!\n"
             "Спрашивай что хочешь — отвечу по-пацански."
         )
 
@@ -160,12 +168,11 @@ if __name__ == '__main__':
     
     if is_worker and bot:
         print("🤬 Колян запущен и готов!")
-        while True:
-            try:
-                bot.infinity_polling()
-            except Exception as e:
-                print(f"⚠️ Ошибка: {e}, перезапуск...")
-                time.sleep(5)
+        try:
+            bot.infinity_polling()
+        except Exception as e:
+            print(f"⚠️ Ошибка: {e}")
+            time.sleep(5)
     else:
         port = int(os.environ.get('PORT', 5000))
         app.run(host='0.0.0.0', port=port)
